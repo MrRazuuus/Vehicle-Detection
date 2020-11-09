@@ -21,7 +21,7 @@ def detectCar(frame):
     cars = cars_cascade.detectMultiScale(gray, 1.2, 5, 30)
     carsSeen = []
     for x, y, w, h in cars:
-        if (w > 75) & (h > 75):
+        if w*h > 5000:
             tx, ty = get_centroid(x, y, w, h)
             cv2.rectangle(frame, (x, y), (x + w - 1, y + h - 1), (255, 0, 0), 2)
             carsSeen.append(((x, y, w, h), (tx, ty)))
@@ -31,7 +31,7 @@ def detectCar(frame):
 def detectCar2(frame, frame_number):
     global first_frame;
     carsSeen = []
-    if frame_number == 0: # Checks if its the first frame.
+    if frame_number == 10: # Checks if its the first frame.
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         print("hello")
         first_frame = gray
@@ -40,20 +40,18 @@ def detectCar2(frame, frame_number):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
-        cv2.imshow("binary", first_frame)
         diff_frame = cv2.absdiff(gray, first_frame)
 
         thresh_frame = cv2.threshold(diff_frame, 30, 255, cv2.THRESH_BINARY)[1]
         thresh_frame = cv2.dilate(thresh_frame, None, iterations=2)
-
         # Finding contour of moving object
         contours, _ = cv2.findContours(thresh_frame.copy(),
                                    cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for x, y, w, h in contours:
-            if (w > 75) & (h > 75):
-                tx, ty = get_centroid(x, y, w, h)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-                carsSeen.append(((x, y, w, h), (tx, ty)))
+        cv2.drawContours(frame , contours , -1 , (0 , 255 , 0) , 3)
+        # for x, y, w, h in contours:
+        #     tx, ty = get_centroid(x, y, w, h)
+        #     cv2.drawContours(frame , contours , -1 , (0 , 255 , 0) , 3)
+        #     carsSeen.append(((x, y, w, h), (tx, ty)))
     return carsSeen
 
 
@@ -67,7 +65,7 @@ def startTracker():
     # Change cv2.VideoCapture() input to either cam to use camera or carVid to get the Video given
     carVid = 'cars2.mp4'
     cam = 0
-    vid = cv2.VideoCapture(carVid)
+    vid = cv2.VideoCapture(cam)
     frame_number = -1
 
     while True:
@@ -76,15 +74,14 @@ def startTracker():
         ret, frame = vid.read()
         if type(frame) == type(None):
             break
-
         carArr = carArray()
 
         #carsInFrame = detectCar(frame)
-        carsInFrame2 = detectCar2(frame, frame_number)
+        carsInFrame = detectCar2(frame, frame_number)
 
-        carArr.update(carsInFrame2, frame, frame_number)
+        carArr.update(carsInFrame, frame, frame_number)
 
-        #showStream(frame)
+        showStream(frame)
 
         # Quits when the q button is pressed.
         key = cv2.waitKey(1) & 0xFF
