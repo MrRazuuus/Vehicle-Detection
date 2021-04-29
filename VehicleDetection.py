@@ -1,11 +1,30 @@
 import cv2
 from datetime import datetime
-from carTracker import carArray
+import time
+
+import imutils as imutils
+import numpy as np
+
+location1 = []
+location2 = []
+speeds = []
+
+# Amount of cars detected
+carsCounted = 0
+
+time1 = 0
+time2 = 0
+
 
 frameW = 1280
 frameH = 720
 
-cars_cascade = cv2.CascadeClassifier('cars.xml')
+
+# Start- and end-points for lines on image
+start1 = (frameW//4, 0)
+end1 = (frameW//4, frameH)
+start2 = ((frameW//4)*3, 0)
+end2 = ((frameW//4)*3, frameH)
 
 
 # Calculates and returns the centroid of the given inputs
@@ -16,70 +35,131 @@ def get_centroid(x, y, w, h):
     return tx, ty
 
 
-def detectCar(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    cars = cars_cascade.detectMultiScale(gray, 1.2, 5, 30)
-    carsSeen = []
-    for x, y, w, h in cars:
-        if w*h > 5000:
-            tx, ty = get_centroid(x, y, w, h)
-            cv2.rectangle(frame, (x, y), (x + w - 1, y + h - 1), (255, 0, 0), 2)
-            carsSeen.append(((x, y, w, h), (tx, ty)))
-    return carsSeen
+def estimateSpeed():
+    t1, x1 = location1[-1]
+    t2, x2 = location2[-1]
+
+    # Distance from one side of the frame to the other in m
+    distance = 25
+
+    ppm = frameW/distance
+
+    # Delta time in frames
+    d_t = abs(t2 - t1)
+
+    # Delta x in pixels
+    d_x = abs(x2 - x1)
+
+    # Pixels per frame
+    ppf = (d_x/d_t)
+    # ppf -> Meters per frame
+    mpf = (ppf/ppm)
+    # mpf -> Meters per second (multiply by framerate)
+    mps = mpf*30
+    # mps -> kmt
+    kmt = mps*3.6
+
+    speeds.append(int(kmt))
+    print(speeds[-1])
 
 
-def detectCar2(frame, frame_number):
-    global first_frame;
-    carsSeen = []
-    if frame_number == 10: # Checks if its the first frame.
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        print("hello")
-        first_frame = gray
+def storeCentroid(tx, ty, frame_number):
+    global carsCounted
+    global time1
+    global time2
+    if 0 < tx < frameW//4:
+        if time.time() >= (time1 + 1):
+            if len(location1) == carsCounted:
+                location1.append((frame_number,tx))
+                time1 = time.time()
+                carsCounted = carsCounted + 1
+            elif len(location2) > len(location1):
+                location1.append((frame_number,tx))
+                time1 = time.time()
+                estimateSpeed()
 
-    else:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+    elif (frameW//4)*3 < tx < frameW:
+        if time.time() >= (time2 + 1):
+            if len(location2) == carsCounted:
+                location2.append((frame_number,tx))
+                time2 = time.time()
+                carsCounted = carsCounted + 1
+            elif len(location1) > len(location2):
+                location2.append((frame_number,tx))
+                time2 = time.time()
+                estimateSpeed()
 
-        diff_frame = cv2.absdiff(gray, first_frame)
 
-        thresh_frame = cv2.threshold(diff_frame, 30, 255, cv2.THRESH_BINARY)[1]
-        thresh_frame = cv2.dilate(thresh_frame, None, iterations=2)
-        # Finding contour of moving object
-        contours, _ = cv2.findContours(thresh_frame.copy(),
-                                   cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(frame , contours , -1 , (0 , 255 , 0) , 3)
-        # for x, y, w, h in contours:
-        #     tx, ty = get_centroid(x, y, w, h)
-        #     cv2.drawContours(frame , contours , -1 , (0 , 255 , 0) , 3)
-        #     carsSeen.append(((x, y, w, h), (tx, ty)))
-    return carsSeen
+def detectCar2(frame, first_frame, frame_number):
+    # Grey image of the current frame
+    gray1 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Performs gaussian blur on the frame
+    gray2 = cv2.GaussianBlur(gray1, (21, 21), 0)
+
+    # Absolute difference from the first image and the current frame
+    diff_frame = cv2.absdiff(gray2, first_frame)
+
+    # Binary image of the absolute difference
+    thresh_frame = cv2.threshold(diff_frame, 30, 255, cv2.THRESH_BINARY)[1]
+    thresh_frame = cv2.dilate(thresh_frame, None, iterations=2)
+
+    # Finding contour of object
+    contours, _ = cv2.findContours(thresh_frame.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        x,y,w,h = cv2.boundingRect(contour)
+        if cv2.contourArea(contour)<5000:
+            continue
+
+        # Get centroid of the object
+        tx , ty = get_centroid(x, y, w, h)
+        cv2.rectangle(frame, (x, y), (x + w - 1, y + h - 1), (255, 0, 0), 2)
+        storeCentroid(tx, ty, frame_number)
 
 
 def showStream(frame):
+    # Draw lines for speed estimation
+    cv2.line(frame, start1, end1, (255,0,0), 2)
+    cv2.line(frame, start2, end2, (255,0,0), 2)
+
+    #Add text to image
+    if len(speeds) > 0:
+        speed = ("Last recorded speed was: ", str(speeds[-1]), " km/t")
+        speedStr = "".join(speed)
+        cv2.putText(frame, speedStr, (0, 60), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0))
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cv2.putText(frame, ts, (0, 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0))
+    cv2.putText(frame, ts, (0, 25), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0))
     cv2.imshow("Frame", frame)
 
 
 def startTracker():
     # Change cv2.VideoCapture() input to either cam to use camera or carVid to get the Video given
-    carVid = 'cars2.mp4'
+    global time1, time2
+    time1 = time.time()
+    time2 = time.time()
+    carVid = 'cars3.mp4'
     cam = 0
-    vid = cv2.VideoCapture(cam)
+    vid = cv2.VideoCapture(carVid)
     frame_number = -1
-
+    first_frame = None
+    time.sleep(1)
     while True:
         # Capture the video frame by frame
         frame_number += 1
-        ret, frame = vid.read()
+        _, frame = vid.read()
+
         if type(frame) == type(None):
             break
-        carArr = carArray()
 
-        #carsInFrame = detectCar(frame)
-        carsInFrame = detectCar2(frame, frame_number)
+        frame = cv2.resize(frame, (frameW, frameH))
 
-        carArr.update(carsInFrame, frame, frame_number)
+        # Stores the first frame of the video
+        if first_frame is None:
+            f1 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            f1b = cv2.GaussianBlur(f1, (21, 21), 0)
+            first_frame = f1b
+
+        detectCar2(frame, first_frame, frame_number)
 
         showStream(frame)
 
